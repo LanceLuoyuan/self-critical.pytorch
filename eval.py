@@ -21,6 +21,8 @@ import torch
 # Input arguments and options
 parser = argparse.ArgumentParser()
 # Input paths
+parser.add_argument('--dataset', type = str, default ='', help = 'coco flickr8k flickr30k')
+
 parser.add_argument('--model', type=str, default='',
                 help='path to model to evaluate')
 parser.add_argument('--cnn_model', type=str,  default='resnet101',
