@@ -1,3 +1,4 @@
+#coding=utf-8
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -59,11 +60,25 @@ class LanguageModelCriterion(nn.Module):
         # truncate to the same size
         target = target[:, :input.size(1)]
         mask =  mask[:, :input.size(1)]
-
+        # gather中的index需要与指定的dim数相同
         output = -input.gather(2, target.unsqueeze(2)).squeeze(2) * mask
         output = torch.sum(output) / torch.sum(mask)
-
+        # 交叉熵损失
         return output
+
+class CRFModelCriterion(nn.Module):
+    def __init__(self):
+        super(CRFModelCriterion, self).__init__()
+
+    def forward(self, crfloss, input, target, mask):
+        # truncate to the same size
+        target = target[:, :input.size(1)]
+        mask =  mask[:, :input.size(1)]
+        # gather中的index需要与指定的dim数相同
+        output = -input.gather(2, target.unsqueeze(2)).squeeze(2) * mask
+        output = torch.sum(output) / torch.sum(mask)
+        # 交叉熵损失
+        return -crfloss + output;
 
 def set_lr(optimizer, lr):
     for group in optimizer.param_groups:

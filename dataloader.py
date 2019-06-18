@@ -46,6 +46,9 @@ class DataLoader(data.Dataset):
         self.ix_to_word = self.info['ix_to_word']
         self.vocab_size = len(self.ix_to_word)
         print('vocab size is ', self.vocab_size)
+        self.postoi = self.info['postoi']
+        self.pos_size = len(self.postoi)
+        print('pos size is ', self.pos_size)
         
         # open the hdf5 file
         print('DataLoader loading h5 file: ', opt.input_fc_dir, opt.input_att_dir, opt.input_box_dir, opt.input_label_h5)
@@ -106,14 +109,17 @@ class DataLoader(data.Dataset):
         if ncap < seq_per_img:
             # we need to subsample (with replacement)
             seq = np.zeros([seq_per_img, self.seq_length], dtype = 'int')
+            pos = np.zeros([seq_per_img, self.seq_length], dtype = 'int')
             for q in range(seq_per_img):
                 ixl = random.randint(ix1,ix2)
                 seq[q, :] = self.h5_label_file['labels'][ixl, :self.seq_length]
+                pos[q, :] = self.h5_label_file['allPos'][ixl, :self.seq_length]
         else:
             ixl = random.randint(ix1, ix2 - seq_per_img + 1)
             seq = self.h5_label_file['labels'][ixl: ixl + seq_per_img, :self.seq_length]
+            pos = self.h5_label_file['allPos'][ixl: ixl + seq_per_img, :self.seq_length]
 
-        return seq
+        return seq, pos
 
     def get_batch(self, split, batch_size=None, seq_per_img=None):
         batch_size = batch_size or self.batch_size
@@ -122,6 +128,7 @@ class DataLoader(data.Dataset):
         fc_batch = [] # np.ndarray((batch_size * seq_per_img, self.opt.fc_feat_size), dtype = 'float32')
         att_batch = [] # np.ndarray((batch_size * seq_per_img, 14, 14, self.opt.att_feat_size), dtype = 'float32')
         label_batch = np.zeros([batch_size * seq_per_img, self.seq_length + 2], dtype = 'int')
+        pos_batch = np.zeros([batch_size * seq_per_img, self.seq_length + 2], dtype='int')
         mask_batch = np.zeros([batch_size * seq_per_img, self.seq_length + 2], dtype = 'float32')
 
         wrapped = False
@@ -135,8 +142,10 @@ class DataLoader(data.Dataset):
                 ix, tmp_wrapped = self._prefetch_process[split].get()
             fc_batch.append(tmp_fc)
             att_batch.append(tmp_att)
-            
-            label_batch[i * seq_per_img : (i + 1) * seq_per_img, 1 : self.seq_length + 1] = self.get_captions(ix, seq_per_img)
+
+            label_batch[i * seq_per_img: (i + 1) * seq_per_img, 1: self.seq_length + 1],\
+            pos_batch[i * seq_per_img : (i + 1) * seq_per_img, 1 : self.seq_length + 1] =\
+                self.get_captions(ix, seq_per_img)
 
             if tmp_wrapped:
                 wrapped = True
@@ -154,8 +163,8 @@ class DataLoader(data.Dataset):
         # #sort by att_feat length
         # fc_batch, att_batch, label_batch, gts, infos = \
         #     zip(*sorted(zip(fc_batch, att_batch, np.vsplit(label_batch, batch_size), gts, infos), key=lambda x: len(x[1]), reverse=True))
-        fc_batch, att_batch, label_batch, gts, infos = \
-            zip(*sorted(zip(fc_batch, att_batch, np.vsplit(label_batch, batch_size), gts, infos), key=lambda x: 0, reverse=True))
+        fc_batch, att_batch, label_batch, pos_batch, gts, infos = \
+            zip(*sorted(zip(fc_batch, att_batch, np.vsplit(label_batch, batch_size), np.vsplit(pos_batch, batch_size), gts, infos), key=lambda x: 0, reverse=True))
         data = {}
         data['fc_feats'] = np.stack(reduce(lambda x,y:x+y, [[_]*seq_per_img for _ in fc_batch]))
         # merge att_feats
@@ -171,6 +180,7 @@ class DataLoader(data.Dataset):
             data['att_masks'] = None
 
         data['labels'] = np.vstack(label_batch)
+        data['pos'] = np.vstack(pos_batch)
         # generate mask
         nonzeros = np.array(list(map(lambda x: (x != 0).sum()+2, data['labels'])))
         for ix, row in enumerate(mask_batch):

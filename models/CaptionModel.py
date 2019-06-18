@@ -121,6 +121,7 @@ class CaptionModel(nn.Module):
         args = [_.chunk(group_size) if _ is not None else [None]*group_size for _ in args]
         args = [[args[i][j] for i in range(len(args))] for j in range(group_size)]
 
+        states = []
         for t in range(self.seq_length + group_size - 1):
             for divm in range(group_size): 
                 if t >= divm and t <= self.seq_length + divm - 1:
@@ -150,7 +151,7 @@ class CaptionModel(nn.Module):
                                                 beam_seq_logprobs_table[divm],
                                                 beam_logprobs_sum_table[divm],
                                                 state_table[divm])
-
+                    states.append(state_table[divm])
                     # if time's up... or if end token is reached then copy beams
                     for vix in range(bdash):
                         if beam_seq_table[divm][t-divm,vix] == 0 or t == self.seq_length + divm - 1:
@@ -169,7 +170,7 @@ class CaptionModel(nn.Module):
                     # move the current group one step forward in time
                     
                     it = beam_seq_table[divm][t-divm]
-                    logprobs_table[divm], state_table[divm] = self.get_logprobs_state(it.cuda(), *(args[divm] + [state_table[divm]]))
+                    logprobs_table[divm], state_table[divm], _ = self.get_logprobs_state(it.cuda(), *(args[divm] + [state_table[divm]] + [states]))
 
         # all beams are sorted by their log-probabilities
         done_beams_table = [sorted(done_beams_table[i], key=lambda x: -x['p'])[:bdash] for i in range(group_size)]

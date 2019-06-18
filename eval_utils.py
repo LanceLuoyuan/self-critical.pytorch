@@ -17,8 +17,16 @@ import misc.utils as utils
 
 def language_eval(dataset, preds, model_id, split):
     import sys
-    sys.path.append("coco-caption")
-    annFile = 'coco-caption/annotations/captions_val2014.json'
+    if 'coco'in dataset:
+        sys.path.append("coco-caption")
+        annFile = 'coco-caption/annotations/captions_val2014.json'
+    if 'flickr8k' in dataset:
+        sys.path.append("flickr8k-caption")
+        annFile = 'flickr8k-caption/annotations/captions_flickr8k.json'
+    if 'flickr30k' in dataset:
+        sys.path.append("flickr30k-caption")
+        annFile = 'flickr30k-caption/annotations/captions_flickr30k.json'
+
     from pycocotools.coco import COCO
     from pycocoevalcap.eval import COCOEvalCap
 
@@ -79,14 +87,17 @@ def eval_split(model, crit, loader, eval_kwargs={}):
         data = loader.get_batch(split)
         n = n + loader.batch_size
 
+        print(data.keys())
         if data.get('labels', None) is not None and verbose_loss:
             # forward the model to get loss
-            tmp = [data['fc_feats'], data['att_feats'], data['labels'], data['masks'], data['att_masks']]
+            tmp = [data['fc_feats'], data['att_feats'], data['labels'], data['pos'], data['masks'], data['att_masks']]
             tmp = [torch.from_numpy(_).cuda() if _ is not None else _ for _ in tmp]
-            fc_feats, att_feats, labels, masks, att_masks = tmp
+            fc_feats, att_feats, labels, pos, masks, att_masks = tmp
 
             with torch.no_grad():
-                loss = crit(model(fc_feats, att_feats, labels, att_masks), labels[:,1:], masks[:,1:]).item()
+                outputs, crfloss = model(fc_feats, att_feats, labels, pos[:, 1:], masks[:, 1:], att_masks)
+                loss = crit(crfloss, outputs, labels[:, 1:], masks[:, 1:]).item()
+                #loss = crit(model(fc_feats, att_feats, labels, att_masks), labels[:,1:], masks[:,1:]).item()
             loss_sum = loss_sum + loss
             loss_evals = loss_evals + 1
 

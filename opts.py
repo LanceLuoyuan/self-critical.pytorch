@@ -128,6 +128,10 @@ def parse_opt():
     parser.add_argument('--bleu_reward_weight', type=float, default=0,
                     help='The reward weight from bleu4')
 
+    parser.add_argument('--att_type', type=str, default="normal",
+                    help='difference attention type is normal or intra')
+    parser.add_argument('--use_crf', type=bool, default=False,
+                    help='True USE, False not use')
     args = parser.parse_args()
 
     # Check if args are valid

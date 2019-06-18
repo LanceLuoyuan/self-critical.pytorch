@@ -37,6 +37,7 @@ def train(opt):
     loader = DataLoader(opt)
     opt.vocab_size = loader.vocab_size
     opt.seq_length = loader.seq_length
+    opt.pos_size = loader.pos_size
 
     tb_summary_writer = tb and tb.SummaryWriter(opt.checkpoint_path)
 
@@ -74,8 +75,7 @@ def train(opt):
     update_lr_flag = True
     # Assure in training mode
     dp_model.train()
-
-    crit = utils.LanguageModelCriterion()
+    crit = utils.CRFModelCriterion()
     rl_crit = utils.RewardCriterion()
 
     optimizer = utils.build_optimizer(model.parameters(), opt)
@@ -116,13 +116,14 @@ def train(opt):
         torch.cuda.synchronize()
         start = time.time()
 
-        tmp = [data['fc_feats'], data['att_feats'], data['labels'], data['masks'], data['att_masks']]
+        tmp = [data['fc_feats'], data['att_feats'], data['labels'], data['pos'], data['masks'], data['att_masks']]
         tmp = [_ if _ is None else torch.from_numpy(_).cuda() for _ in tmp]
-        fc_feats, att_feats, labels, masks, att_masks = tmp
+        fc_feats, att_feats, labels, pos, masks, att_masks = tmp
         
         optimizer.zero_grad()
         if not sc_flag:
-            loss = crit(dp_model(fc_feats, att_feats, labels, att_masks), labels[:,1:], masks[:,1:])
+            outputs, crfloss = dp_model(fc_feats, att_feats, labels, pos[:, 1:], masks[:,1:], att_masks)
+            loss = crit(crfloss, outputs, labels[:,1:], masks[:,1:])
         else:
             gen_result, sample_logprobs = dp_model(fc_feats, att_feats, att_masks, opt={'sample_max':0}, mode='sample')
             reward = get_self_critical_reward(dp_model, fc_feats, att_feats, att_masks, data, gen_result, opt)

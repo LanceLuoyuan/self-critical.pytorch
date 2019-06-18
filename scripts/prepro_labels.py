@@ -39,11 +39,23 @@ import torch
 import torchvision.models as models
 import skimage.io
 from PIL import Image
+import spacy
 
 def build_vocab(imgs, params):
   count_thr = params['word_count_threshold']
 
   # count up the number of words
+  nlp = spacy.load('en')
+  pos_counts = {}
+  for img in imgs:
+    for sent in img['sentences']:
+      doc = nlp(sent['raw'].decode('utf-8'))
+      for token in doc:
+        pos_counts[token.pos_] = pos_counts.get(token.pos_, 0) + 1
+
+  tokenPos = [k.encode('utf-8') for k, v in pos_counts.iteritems()]
+  print("pos_counts:", pos_counts)
+
   counts = {}
   for img in imgs:
     for sent in img['sentences']:
@@ -90,9 +102,9 @@ def build_vocab(imgs, params):
       caption = [w if counts.get(w,0) > count_thr else 'UNK' for w in txt]
       img['final_captions'].append(caption)
 
-  return vocab
+  return vocab, tokenPos
 
-def encode_captions(imgs, params, wtoi):
+def encode_captions(imgs, params, wtoi, postoi):
   """ 
   encode all captions into one large array, which will be 1-indexed.
   also produces label_start_ix and label_end_ix which store 1-indexed 
@@ -104,17 +116,20 @@ def encode_captions(imgs, params, wtoi):
   N = len(imgs)
   M = sum(len(img['final_captions']) for img in imgs) # total number of captions
 
+  pos_arrays = []
   label_arrays = []
   label_start_ix = np.zeros(N, dtype='uint32') # note: these will be one-indexed
   label_end_ix = np.zeros(N, dtype='uint32')
   label_length = np.zeros(M, dtype='uint32')
   caption_counter = 0
   counter = 1
+  nlp = spacy.load('en')
   for i,img in enumerate(imgs):
     n = len(img['final_captions'])
     assert n > 0, 'error: some image has no captions'
 
     Li = np.zeros((n, max_length), dtype='uint32')
+    Posi = np.zeros((n, max_length), dtype='uint32')
     for j,s in enumerate(img['final_captions']):
       label_length[caption_counter] = min(max_length, len(s)) # record the length of this sequence
       caption_counter += 1
@@ -122,19 +137,27 @@ def encode_captions(imgs, params, wtoi):
         if k < max_length:
           Li[j,k] = wtoi[w]
 
+      sent = ' '.join(s)
+      doc = nlp(sent.decode('utf-8'))
+      for k, token in enumerate(doc):
+        if k < max_length:
+          Posi[j, k] = postoi[token.pos_.encode('utf-8')]
+
     # note: word indices are 1-indexed, and captions are padded with zeros
     label_arrays.append(Li)
+    pos_arrays.append(Posi)
     label_start_ix[i] = counter
     label_end_ix[i] = counter + n - 1
     
     counter += n
   
   L = np.concatenate(label_arrays, axis=0) # put all the labels together
+  allPos = np.concatenate(pos_arrays, axis=0)
   assert L.shape[0] == M, 'lengths don\'t match? that\'s weird'
   assert np.all(label_length > 0), 'error: some caption had no words?'
 
   print('encoded captions to array of size ', L.shape)
-  return L, label_start_ix, label_end_ix, label_length
+  return allPos, L, label_start_ix, label_end_ix, label_length
 
 def main(params):
 
@@ -144,12 +167,14 @@ def main(params):
   seed(123) # make reproducible
   
   # create the vocab
-  vocab = build_vocab(imgs, params)
+  vocab, tokenPos = build_vocab(imgs, params)
   itow = {i+1:w for i,w in enumerate(vocab)} # a 1-indexed vocab translation table
   wtoi = {w:i+1 for i,w in enumerate(vocab)} # inverse table
+  postoi = {w:i+1 for i,w in enumerate(tokenPos)}
+
   
   # encode captions in large arrays, ready to ship to hdf5 file
-  L, label_start_ix, label_end_ix, label_length = encode_captions(imgs, params, wtoi)
+  allPos, L, label_start_ix, label_end_ix, label_length = encode_captions(imgs, params, wtoi, postoi)
 
   # create output h5 file
   N = len(imgs)
@@ -158,12 +183,14 @@ def main(params):
   f_lb.create_dataset("label_start_ix", dtype='uint32', data=label_start_ix)
   f_lb.create_dataset("label_end_ix", dtype='uint32', data=label_end_ix)
   f_lb.create_dataset("label_length", dtype='uint32', data=label_length)
+  f_lb.create_dataset("allPos", dtype='uint32', data=allPos)
   f_lb.close()
 
   # create output json file
   out = {}
   out['ix_to_word'] = itow # encode the (1-indexed) vocab
   out['images'] = []
+  out['postoi'] = postoi
   for i,img in enumerate(imgs):
     
     jimg = {}
